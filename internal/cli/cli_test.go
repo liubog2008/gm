@@ -77,3 +77,37 @@ func TestRunRemovedListCommandReturnsUsage(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
+
+func TestRunInitZshPrintsShellIntegration(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	err := Run(context.Background(), []string{"init", "zsh"}, &stdout, &stderr)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	out := stdout.String()
+	if !strings.Contains(out, "command gm") {
+		t.Fatalf("expected shell wrapper to call command gm, got %q", out)
+	}
+	if !strings.Contains(out, "builtin cd --") {
+		t.Fatalf("expected shell wrapper to cd, got %q", out)
+	}
+	if !strings.Contains(out, `-o|--output-all`) {
+		t.Fatalf("expected shell wrapper to preserve output-all, got %q", out)
+	}
+}
+
+func TestRunInitRejectsUnsupportedShell(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	err := Run(context.Background(), []string{"init", "fish"}, &stdout, &stderr)
+	if !errors.Is(err, errUsage) {
+		t.Fatalf("expected usage error, got %v", err)
+	}
+	if !strings.Contains(err.Error(), `unsupported shell "fish"`) {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}

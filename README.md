@@ -48,6 +48,20 @@ Open the selector for managed repos and worktrees:
 gm
 ```
 
+To let `gm` change your current shell directory after a selection, add shell integration:
+
+```bash
+eval "$(gm init zsh)"
+```
+
+For bash:
+
+```bash
+eval "$(gm init bash)"
+```
+
+After that, `gm`, `gm get ...`, and `gm convert ...` will `cd` into the selected or created directory in your current shell.
+
 Filter results directly:
 
 ```bash
