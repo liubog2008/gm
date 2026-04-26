@@ -54,7 +54,7 @@ func shouldStreamOutput(args []string) bool {
 	if len(args) == 0 {
 		return false
 	}
-	if args[0] == "clone" || args[0] == "fetch" {
+	if args[0] == "clone" || args[0] == "fetch" || args[0] == "push" {
 		return true
 	}
 	return len(args) >= 4 && args[0] == "--git-dir" && args[2] == "worktree" && args[3] == "add"
@@ -65,7 +65,7 @@ func withProgress(args []string) []string {
 		return args
 	}
 	switch args[0] {
-	case "clone", "fetch":
+	case "clone", "fetch", "push":
 		if hasArg(args, "--progress") {
 			return args
 		}

@@ -111,3 +111,29 @@ func TestRunInitRejectsUnsupportedShell(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
+
+func TestRunFeatAddRejectsUnsupportedBaseAsUsage(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	err := Run(context.Background(), []string{"--base", t.TempDir(), "feat", "add", "feat-login", "origin/main"}, &stdout, &stderr)
+	if !errors.Is(err, errUsage) {
+		t.Fatalf("expected usage error, got %v", err)
+	}
+	if !strings.Contains(err.Error(), `unsupported base "origin/main"`) {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestRunFeatSyncRejectsTooManyArgsAsUsage(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	err := Run(context.Background(), []string{"--base", t.TempDir(), "feat", "sync", "origin", "upstream"}, &stdout, &stderr)
+	if !errors.Is(err, errUsage) {
+		t.Fatalf("expected usage error, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "feat sync requires [remote]") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
