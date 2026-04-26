@@ -266,10 +266,10 @@ remotes:
   - origin
 ```
 
-3. Print the synced remote branch:
+3. Print the current directory path to stdout so shell wrappers that `cd` to `gm` output remain in the same directory:
 
 ```text
-origin/feat-login
+/base/github.com/acme/demo/feat-login
 ```
 
 If sync fails, leave `.gm` unchanged.
@@ -441,7 +441,7 @@ func (m *Manager) PruneFeatureWorktrees(ctx context.Context, opts FeaturePruneOp
 8. Run `git push -u <remote> HEAD:<branch>`.
 9. Append `<remote>` to `.gm remotes` if missing.
 10. Update `.gm status` to `synced`.
-11. Print `<remote>/<branch>`.
+11. Print the command's starting directory.
 
 `feat prune`:
 
