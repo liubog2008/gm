@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 
 	"github.com/liubog2008/gm/internal/config"
@@ -119,6 +120,7 @@ func newRootCommand(stdout, stderr io.Writer) *cobra.Command {
 	root.Flags().BoolP("worktree", "w", false, "show only worktree directories")
 	root.AddCommand(newGetCommand(&manager, stdout))
 	root.AddCommand(newConvertCommand(&manager, stdout))
+	root.AddCommand(newInitCommand(stdout))
 
 	return root
 }
@@ -181,6 +183,70 @@ func newConvertCommand(manager **repo.Manager, stdout io.Writer) *cobra.Command 
 
 	cmd.Flags().SetInterspersed(false)
 	return cmd
+}
+
+func newInitCommand(stdout io.Writer) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "init <shell>",
+		Short: "Print shell integration for directory switching",
+		Args: func(cmd *cobra.Command, args []string) error {
+			if len(args) != 1 {
+				return fmt.Errorf("%w: init requires <shell>", errUsage)
+			}
+			if !slices.Contains([]string{"bash", "zsh"}, args[0]) {
+				return fmt.Errorf("%w: unsupported shell %q", errUsage, args[0])
+			}
+			return nil
+		},
+		RunE: func(cmd *cobra.Command, args []string) error {
+			_, err := fmt.Fprint(stdout, shellInitScript(args[0]))
+			return err
+		},
+	}
+
+	cmd.Flags().SetInterspersed(false)
+	return cmd
+}
+
+func shellInitScript(shell string) string {
+	return fmt.Sprintf(`# gm shell integration for %s
+_gm_should_cd() {
+  case "$1" in
+    ""|get|convert)
+      return 0
+      ;;
+    init|help|-h|--help)
+      return 1
+      ;;
+  esac
+
+  for arg in "$@"; do
+    case "$arg" in
+      -o|--output-all)
+        return 1
+        ;;
+    esac
+  done
+
+  return 0
+}
+
+gm() {
+  local out exit_code
+  out="$(command gm "$@")"
+  exit_code=$?
+  if [ $exit_code -ne 0 ]; then
+    return $exit_code
+  fi
+
+  if _gm_should_cd "$@"; then
+    [ -n "$out" ] && builtin cd -- "$out"
+    return $?
+  fi
+
+  [ -n "$out" ] && printf '%%s\n' "$out"
+}
+`, shell)
 }
 
 func usageError(cmd *cobra.Command, message string) error {
