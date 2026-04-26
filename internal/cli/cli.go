@@ -18,6 +18,11 @@ import (
 
 var errUsage = errors.New("usage")
 
+const (
+	shellIntegrationEnv = "GM_SHELL_INTEGRATION"
+	shellCDPrefix       = "__gm_cd__:"
+)
+
 func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	cmd := newRootCommand(stdout, stderr)
 	cmd.SetArgs(args)
@@ -148,8 +153,7 @@ func newGetCommand(manager **repo.Manager, stdout io.Writer) *cobra.Command {
 				return err
 			}
 
-			_, err = fmt.Fprintln(stdout, path)
-			return err
+			return printDir(stdout, path)
 		},
 	}
 
@@ -178,8 +182,7 @@ func newConvertCommand(manager **repo.Manager, stdout io.Writer) *cobra.Command 
 				return err
 			}
 
-			_, err = fmt.Fprintln(stdout, path)
-			return err
+			return printDir(stdout, path)
 		},
 	}
 
@@ -212,43 +215,36 @@ func newInitCommand(stdout io.Writer) *cobra.Command {
 
 func shellInitScript(shell string) string {
 	return fmt.Sprintf(`# gm shell integration for %s
-_gm_should_cd() {
-  case "$1" in
-    ""|get|convert)
-      return 0
-      ;;
-    init|help|-h|--help)
-      return 1
-      ;;
-  esac
-
-  for arg in "$@"; do
-    case "$arg" in
-      -o|--output-all)
-        return 1
-        ;;
-    esac
-  done
-
-  return 0
-}
-
 gm() {
-  local out exit_code
-  out="$(command gm "$@")"
+  local out exit_code line dir display
+  out="$(%s=1 command gm "$@")"
   exit_code=$?
   if [ $exit_code -ne 0 ]; then
     return $exit_code
   fi
 
-  if _gm_should_cd "$@"; then
-    [ -n "$out" ] && builtin cd -- "$out"
-    return $?
-  fi
+  while IFS= read -r line; do
+    case "$line" in
+      %s*)
+        dir="${line#%s}"
+        ;;
+      *)
+        if [ -n "$display" ]; then
+          display="$display
+$line"
+        else
+          display="$line"
+        fi
+        ;;
+    esac
+  done <<EOF
+$out
+EOF
 
-  [ -n "$out" ] && printf '%%s\n' "$out"
+  [ -n "$display" ] && printf '%%s\n' "$display"
+  [ -n "$dir" ] && builtin cd -- "$dir"
 }
-`, shell)
+`, shell, shellIntegrationEnv, shellCDPrefix, shellCDPrefix)
 }
 
 func newFeatCommand(manager **repo.Manager, stdout, stderr io.Writer) *cobra.Command {
@@ -287,8 +283,7 @@ func newFeatAddCommand(manager **repo.Manager, stdout io.Writer) *cobra.Command 
 			if err != nil {
 				return err
 			}
-			_, err = fmt.Fprintln(stdout, path)
-			return err
+			return printDir(stdout, path)
 		},
 	}
 	cmd.Flags().SetInterspersed(false)
@@ -320,8 +315,7 @@ func newFeatSyncCommand(manager **repo.Manager, stdout io.Writer) *cobra.Command
 			}); err != nil {
 				return err
 			}
-			_, err = fmt.Fprintln(stdout, cwd)
-			return err
+			return printDir(stdout, cwd)
 		},
 	}
 	cmd.Flags().SetInterspersed(false)
@@ -351,8 +345,7 @@ func newFeatPruneCommand(manager **repo.Manager, stdout, stderr io.Writer) *cobr
 				}
 			}
 			if result.FinalDir != "" {
-				_, err = fmt.Fprintln(stdout, result.FinalDir)
-				return err
+				return printDir(stdout, result.FinalDir)
 			}
 			return nil
 		},
@@ -376,6 +369,15 @@ func usageError(cmd *cobra.Command, message string) error {
 		return errUsage
 	}
 	return fmt.Errorf("%w: %s", errUsage, message)
+}
+
+func printDir(stdout io.Writer, path string) error {
+	if os.Getenv(shellIntegrationEnv) != "" {
+		_, err := fmt.Fprintf(stdout, "%s%s\n", shellCDPrefix, path)
+		return err
+	}
+	_, err := fmt.Fprintln(stdout, path)
+	return err
 }
 
 func configureBaseFlag(flags *pflag.FlagSet, baseDir *string) {

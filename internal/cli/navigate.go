@@ -103,8 +103,7 @@ func runNavigate(ctx context.Context, manager *repo.Manager, stdout io.Writer, c
 	if err := saveRecent(recentPath, recent); err != nil {
 		return err
 	}
-	_, err = fmt.Fprintln(stdout, selected.Path)
-	return err
+	return printDir(stdout, selected.Path)
 }
 
 func selectEntry(entries []repo.Entry, recent map[string]int64, opts navigateOptions) (repo.Entry, error) {

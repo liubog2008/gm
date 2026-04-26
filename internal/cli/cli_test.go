@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -94,8 +95,49 @@ func TestRunInitZshPrintsShellIntegration(t *testing.T) {
 	if !strings.Contains(out, "builtin cd --") {
 		t.Fatalf("expected shell wrapper to cd, got %q", out)
 	}
-	if !strings.Contains(out, `-o|--output-all`) {
-		t.Fatalf("expected shell wrapper to preserve output-all, got %q", out)
+	if strings.Contains(out, "_gm_should_cd") {
+		t.Fatalf("expected shell wrapper to avoid command-specific cd logic, got %q", out)
+	}
+	if !strings.Contains(out, shellIntegrationEnv+"=1") {
+		t.Fatalf("expected shell wrapper to enable shell integration protocol, got %q", out)
+	}
+}
+
+func TestShellIntegrationFeatPrunePrintsRemovedPathWithoutCd(t *testing.T) {
+	tmp := t.TempDir()
+	start := filepath.Join(tmp, "start")
+	if err := os.Mkdir(start, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	removed := filepath.Join(tmp, "removed")
+
+	stdout, pwd := runShellIntegration(t, start, removed)
+	if stdout != removed+"\n" {
+		t.Fatalf("stdout = %q, want %q", stdout, removed+"\n")
+	}
+	if strings.TrimSpace(pwd) != start {
+		t.Fatalf("pwd = %q, want %q", strings.TrimSpace(pwd), start)
+	}
+}
+
+func TestShellIntegrationFeatPruneCdsToFinalDir(t *testing.T) {
+	tmp := t.TempDir()
+	start := filepath.Join(tmp, "start")
+	finalDir := filepath.Join(tmp, "repo")
+	if err := os.Mkdir(start, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(finalDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	removed := filepath.Join(tmp, "removed")
+
+	stdout, pwd := runShellIntegration(t, start, removed+"\n"+shellCDPrefix+finalDir)
+	if stdout != removed+"\n" {
+		t.Fatalf("stdout = %q, want %q", stdout, removed+"\n")
+	}
+	if strings.TrimSpace(pwd) != finalDir {
+		t.Fatalf("pwd = %q, want %q", strings.TrimSpace(pwd), finalDir)
 	}
 }
 
@@ -110,6 +152,49 @@ func TestRunInitRejectsUnsupportedShell(t *testing.T) {
 	if !strings.Contains(err.Error(), `unsupported shell "fish"`) {
 		t.Fatalf("unexpected error: %v", err)
 	}
+}
+
+func runShellIntegration(t *testing.T, startDir, fakeOutput string) (string, string) {
+	t.Helper()
+
+	tmp := t.TempDir()
+	binDir := filepath.Join(tmp, "bin")
+	if err := os.Mkdir(binDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	fakeGM := filepath.Join(binDir, "gm")
+	if err := os.WriteFile(fakeGM, []byte("#!/bin/sh\nprintf '%s\\n' \"$GM_FAKE_OUT\"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	stdoutPath := filepath.Join(tmp, "stdout")
+	pwdPath := filepath.Join(tmp, "pwd")
+	script := shellInitScript("bash") + `
+gm feat prune > "$GM_STDOUT"
+pwd > "$GM_PWD"
+`
+	cmd := exec.Command("bash", "-c", script)
+	cmd.Dir = startDir
+	cmd.Env = append(os.Environ(),
+		"PATH="+binDir+string(os.PathListSeparator)+os.Getenv("PATH"),
+		"GM_FAKE_OUT="+fakeOutput,
+		"GM_STDOUT="+stdoutPath,
+		"GM_PWD="+pwdPath,
+	)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("shell integration failed: %v\n%s", err, output)
+	}
+
+	stdout, err := os.ReadFile(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pwd, err := os.ReadFile(pwdPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(stdout), string(pwd)
 }
 
 func TestRunFeatAddRejectsUnsupportedBaseAsUsage(t *testing.T) {
