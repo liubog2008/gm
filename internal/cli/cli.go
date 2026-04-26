@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"slices"
 	"strings"
 
@@ -91,7 +92,7 @@ func newRootCommand(stdout, stderr io.Writer) *cobra.Command {
 			}
 
 			runner := gitx.CommandRunner{}
-			if cmd.Name() == "get" {
+			if cmd.Name() == "get" || commandUnder(cmd, "feat") {
 				runner = gitx.CommandRunner{
 					Stdout:          stderr,
 					Stderr:          stderr,
@@ -121,6 +122,7 @@ func newRootCommand(stdout, stderr io.Writer) *cobra.Command {
 	root.AddCommand(newGetCommand(&manager, stdout))
 	root.AddCommand(newConvertCommand(&manager, stdout))
 	root.AddCommand(newInitCommand(stdout))
+	root.AddCommand(newFeatCommand(&manager, stdout, stderr))
 
 	return root
 }
@@ -247,6 +249,125 @@ gm() {
   [ -n "$out" ] && printf '%%s\n' "$out"
 }
 `, shell)
+}
+
+func newFeatCommand(manager **repo.Manager, stdout, stderr io.Writer) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "feat",
+		Short: "Manage feature worktrees",
+	}
+	cmd.AddCommand(newFeatAddCommand(manager, stdout))
+	cmd.AddCommand(newFeatSyncCommand(manager, stdout))
+	cmd.AddCommand(newFeatPruneCommand(manager, stdout, stderr))
+	return cmd
+}
+
+func newFeatAddCommand(manager **repo.Manager, stdout io.Writer) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "add <name> [base]",
+		Short: "Create a feature worktree",
+		Args: func(cmd *cobra.Command, args []string) error {
+			if len(args) < 1 || len(args) > 2 {
+				return fmt.Errorf("%w: feat add requires <name> [base]", errUsage)
+			}
+			if len(args) == 2 && args[1] != repo.DefaultWorktreeName && args[1] != "upstream/"+repo.DefaultWorktreeName {
+				return fmt.Errorf("%w: unsupported base %q; expected %q or %q", errUsage, args[1], repo.DefaultWorktreeName, "upstream/"+repo.DefaultWorktreeName)
+			}
+			return nil
+		},
+		RunE: func(cmd *cobra.Command, args []string) error {
+			base := repo.DefaultWorktreeName
+			if len(args) == 2 {
+				base = args[1]
+			}
+			path, err := (*manager).AddFeatureWorktree(cmd.Context(), repo.FeatureAddOptions{
+				Name: args[0],
+				Base: base,
+			})
+			if err != nil {
+				return err
+			}
+			_, err = fmt.Fprintln(stdout, path)
+			return err
+		},
+	}
+	cmd.Flags().SetInterspersed(false)
+	return cmd
+}
+
+func newFeatSyncCommand(manager **repo.Manager, stdout io.Writer) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "sync [remote]",
+		Short: "Sync the current feature branch to a remote",
+		Args: func(cmd *cobra.Command, args []string) error {
+			if len(args) > 1 {
+				return fmt.Errorf("%w: feat sync requires [remote]", errUsage)
+			}
+			return nil
+		},
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cwd, err := os.Getwd()
+			if err != nil {
+				return err
+			}
+			remote := ""
+			if len(args) == 1 {
+				remote = args[0]
+			}
+			if _, err := (*manager).SyncFeatureWorktree(cmd.Context(), repo.FeatureSyncOptions{
+				StartDir: cwd,
+				Remote:   remote,
+			}); err != nil {
+				return err
+			}
+			_, err = fmt.Fprintln(stdout, cwd)
+			return err
+		},
+	}
+	cmd.Flags().SetInterspersed(false)
+	return cmd
+}
+
+func newFeatPruneCommand(manager **repo.Manager, stdout, stderr io.Writer) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "prune",
+		Short: "Remove synced feature worktrees whose remote branches are gone",
+		Args: func(cmd *cobra.Command, args []string) error {
+			if len(args) != 0 {
+				return fmt.Errorf("%w: feat prune takes no arguments", errUsage)
+			}
+			return nil
+		},
+		RunE: func(cmd *cobra.Command, args []string) error {
+			result, err := (*manager).PruneFeatureWorktrees(cmd.Context(), repo.FeaturePruneOptions{
+				Stderr: stderr,
+			})
+			if err != nil {
+				return err
+			}
+			for _, path := range result.RemovedPaths {
+				if _, err := fmt.Fprintln(stdout, path); err != nil {
+					return err
+				}
+			}
+			if result.FinalDir != "" {
+				_, err = fmt.Fprintln(stdout, result.FinalDir)
+				return err
+			}
+			return nil
+		},
+	}
+	cmd.Flags().SetInterspersed(false)
+	return cmd
+}
+
+func commandUnder(cmd *cobra.Command, name string) bool {
+	for c := cmd; c != nil; c = c.Parent() {
+		if c.Name() == name {
+			return true
+		}
+	}
+	return false
 }
 
 func usageError(cmd *cobra.Command, message string) error {
