@@ -288,7 +288,7 @@ func (m *navigatorModel) refresh() {
 	}
 
 	for i, row := range m.rows {
-		if row.selectable && row.entry.Path == prevPath {
+		if row.selectable && row.entry.Path == prevPath && repoKeyByPath(ranked, prevPath) != "" {
 			m.cursor = i
 			m.ensureCursorVisible()
 			return
