@@ -161,6 +161,22 @@ func TestFeaturePruneCurrentWorktreeReturnsRepoRoot(t *testing.T) {
 	}
 }
 
+type rewriteURLRunner struct {
+	inner     gitx.Runner
+	targetURL string
+	localPath string
+}
+
+func (r rewriteURLRunner) Run(ctx context.Context, dir string, args ...string) ([]byte, error) {
+	rewritten := append([]string(nil), args...)
+	for i, arg := range rewritten {
+		if arg == r.targetURL {
+			rewritten[i] = r.localPath
+		}
+	}
+	return r.inner.Run(ctx, dir, rewritten...)
+}
+
 func TestManagerListFromGitWorktree(t *testing.T) {
 	ctx := context.Background()
 	tmp := t.TempDir()
@@ -393,6 +409,68 @@ func TestConvertRepoFeatureBranchUsesBranchNameByDefault(t *testing.T) {
 		t.Fatalf("branch = %q, want feature-x", branch)
 	}
 	checkFile(t, filepath.Join(got, "feature.txt"), "hello\n")
+}
+
+func TestEnsureRepoNamedWorktreeBasesOnFetchedOriginMain(t *testing.T) {
+	ctx := context.Background()
+	tmp := t.TempDir()
+	remote := filepath.Join(tmp, "remote.git")
+	source := filepath.Join(tmp, "source")
+	updater := filepath.Join(tmp, "updater")
+	base := filepath.Join(tmp, "base")
+	remoteURL := "https://github.com/acme/demo.git"
+
+	mustGit(t, ctx, tmp, "init", "--bare", remote)
+	mustGit(t, ctx, tmp, "clone", remote, source)
+	mustGit(t, ctx, source, "config", "user.email", "test@example.com")
+	mustGit(t, ctx, source, "config", "user.name", "Test User")
+	mustGit(t, ctx, source, "config", "commit.gpgsign", "false")
+	if err := os.WriteFile(filepath.Join(source, "README.md"), []byte("# demo\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mustGit(t, ctx, source, "add", "README.md")
+	mustGit(t, ctx, source, "commit", "-m", "initial")
+	mustGit(t, ctx, source, "branch", "-M", "main")
+	mustGit(t, ctx, source, "push", "-u", "origin", "main")
+	mustGit(t, ctx, remote, "symbolic-ref", "HEAD", "refs/heads/main")
+
+	manager := NewManager(base, rewriteURLRunner{
+		inner:     gitx.CommandRunner{},
+		targetURL: remoteURL,
+		localPath: remote,
+	})
+	mainPath, err := manager.EnsureRepo(ctx, remoteURL, "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	initialMainHead := strings.TrimSpace(gitOutput(t, ctx, mainPath, "rev-parse", "HEAD"))
+
+	mustGit(t, ctx, tmp, "clone", remote, updater)
+	mustGit(t, ctx, updater, "config", "user.email", "test@example.com")
+	mustGit(t, ctx, updater, "config", "user.name", "Test User")
+	mustGit(t, ctx, updater, "config", "commit.gpgsign", "false")
+	if err := os.WriteFile(filepath.Join(updater, "fresh.txt"), []byte("new\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mustGit(t, ctx, updater, "add", "fresh.txt")
+	mustGit(t, ctx, updater, "commit", "-m", "update main")
+	mustGit(t, ctx, updater, "push", "origin", "main")
+
+	featurePath, err := manager.EnsureRepo(ctx, remoteURL, "feature-x")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	checkFile(t, filepath.Join(featurePath, "fresh.txt"), "new\n")
+
+	featureBase := strings.TrimSpace(gitOutput(t, ctx, featurePath, "rev-parse", "HEAD"))
+	updatedMainHead := strings.TrimSpace(gitOutput(t, ctx, featurePath, "rev-parse", "origin/main"))
+	if featureBase != updatedMainHead {
+		t.Fatalf("feature base = %q, want %q", featureBase, updatedMainHead)
+	}
+	if updatedMainHead == initialMainHead {
+		t.Fatalf("origin/main was not updated, both heads are %q", updatedMainHead)
+	}
 }
 
 func TestListIncludesLegacyRepoAndSkipsNestedRepos(t *testing.T) {

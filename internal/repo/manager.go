@@ -14,6 +14,7 @@ import (
 )
 
 const DefaultWorktreeName = "main"
+const namedWorktreeBaseRef = "origin/main"
 
 type Worktree struct {
 	Name     string
@@ -152,7 +153,7 @@ func (m *Manager) EnsureRepo(ctx context.Context, rawURL, worktreeName string) (
 		return "", err
 	}
 
-	if _, err := m.git.Run(ctx, loc.Root, "--git-dir", bareDir, "fetch", "--all", "--prune"); err != nil {
+	if err := m.fetchOrigin(ctx, loc.Root, bareDir); err != nil {
 		return "", err
 	}
 
@@ -318,8 +319,21 @@ func (m *Manager) addNamedWorktree(ctx context.Context, bareDir, targetPath, wor
 		return err
 	}
 
-	_, err := m.git.Run(ctx, m.baseDir, "--git-dir", bareDir, "worktree", "add", "-b", worktreeName, targetPath, defaultBranch)
+	baseRef := defaultBranch
+	if m.refExists(ctx, bareDir, "refs/remotes/"+namedWorktreeBaseRef) {
+		baseRef = namedWorktreeBaseRef
+	}
+
+	_, err := m.git.Run(ctx, m.baseDir, "--git-dir", bareDir, "worktree", "add", "-b", worktreeName, targetPath, baseRef)
 	return err
+}
+
+func (m *Manager) fetchOrigin(ctx context.Context, dir, bareDir string) error {
+	if _, err := m.git.Run(ctx, dir, "--git-dir", bareDir, "fetch", "--prune", "origin", "+refs/heads/*:refs/remotes/origin/*"); err != nil {
+		return err
+	}
+	_, _ = m.git.Run(ctx, dir, "--git-dir", bareDir, "remote", "set-head", "origin", "--auto")
+	return nil
 }
 
 func (m *Manager) refExists(ctx context.Context, bareDir, ref string) bool {
